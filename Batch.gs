@@ -7,9 +7,26 @@
  * gilt damit fuer jedes Blatt gleichermassen - jedes Blatt seine eigene
  * "naechste freie Spalte" waehlen zu lassen wuerde diese Zuordnung kaputt
  * machen, sobald die Blaetter unterschiedlich breit sind.
+ *
+ * ZEILEN-ZUORDNUNG: Der XML-Anker eines Bildes (<xdr:from><xdr:row>) ist NUR
+ * die Start-Zeile, nicht zwingend die Zeile, in der das Bild optisch sitzt.
+ * Live getestet an einer echten Datei: Screenshots waren an einer kurzen
+ * "Section Name"-Kopfzeile verankert, ragten aber fast komplett in die viel
+ * hoehere "Intro Text"-Zeile darunter (Zeilenumbruch, Auto-Hoehe) hinein -
+ * fuer Menschen "gehoert" das Bild sichtbar zur unteren Zeile, nicht zur
+ * Ankerzeile. Da Auto-Hoehe-Zeilen ihre tatsaechliche Renderhoehe NICHT in
+ * der xlsx-XML speichern, laesst sich das nicht rein aus der Datei berechnen
+ * - resolveVisualRow_() fragt stattdessen die live gerenderte Zeilenhoehe
+ * (SpreadsheetApp) ab und bestimmt darueber, in welcher Zeile die Bildmitte
+ * tatsaechlich liegt.
+ *
+ * KOLLISIONEN: Landen zwei Bilder auf derselben Zielzeile, werden ihre URLs
+ * in dieselbe Zelle zusammengefuehrt (zeilenumbruch-getrennt) statt dass die
+ * zweite die erste stillschweigend ueberschreibt.
  */
 
 var IMAGE_HOSTING_FOLDER_PREFIX_ = "context-images";
+var EMU_PER_PIXEL_ = 9525; // Standard-OOXML-Konstante: 914400 EMU/Zoll / 96px/Zoll
 
 /**
  * @param {string} spreadsheetId
@@ -21,12 +38,18 @@ function hostAllSheetsImagesForContextNotes_(spreadsheetId, siteId) {
   var sheets = ss.getSheets();
   var xlsxBlob = exportSpreadsheetAsXlsx_(spreadsheetId);
 
-  var perSheetImages = {}; // sheetName -> [{row, blob}]
+  var perSheetImages = {}; // sheetName -> [{row (visuell, 1-based), blob}]
   var maxLastColumn = 0;
   sheets.forEach(function (sh) {
     maxLastColumn = Math.max(maxLastColumn, sh.getLastColumn());
-    var imgs = xlsxExtractImagesForSheet_(xlsxBlob, sh.getName());
-    if (imgs.length) perSheetImages[sh.getName()] = imgs;
+    var anchors = xlsxExtractImagesForSheet_(xlsxBlob, sh.getName());
+    if (!anchors.length) return;
+
+    var resolved = anchors.map(function (a) {
+      var row = resolveVisualRow_(sh, a.row0, a.rowOffEmu, a.extCyEmu, a.toRow0);
+      return { row: row, blob: a.blob };
+    });
+    perSheetImages[sh.getName()] = resolved;
   });
 
   var sheetNamesWithImages = Object.keys(perSheetImages);
@@ -60,10 +83,17 @@ function hostAllSheetsImagesForContextNotes_(spreadsheetId, siteId) {
     var sh = ss.getSheetByName(sheetName);
     var headerCell = sh.getRange(1, col);
     if (!String(headerCell.getValue() || "").trim()) headerCell.setValue("Screenshot URL");
+
+    var urlsByRow = {}; // row -> [urls] - sammelt Kollisionen statt sie zu ueberschreiben
     perSheetImages[sheetName].forEach(function (img) {
       var url = "https://" + siteId + ".web.app/" + pathPrefix + "/" + img.fileName;
-      sh.getRange(img.row, col).setValue(url);
+      if (!urlsByRow[img.row]) urlsByRow[img.row] = [];
+      urlsByRow[img.row].push(url);
       results.push({ sheet: sheetName, row: img.row, imageUrl: url });
+    });
+
+    Object.keys(urlsByRow).forEach(function (rowStr) {
+      sh.getRange(Number(rowStr), col).setValue(urlsByRow[rowStr].join("\n"));
     });
   });
 
@@ -82,6 +112,42 @@ function hostAllSheetsImagesForContextNotes_(spreadsheetId, siteId) {
     results:         results,
     deploy:          deployResult
   };
+}
+
+/**
+ * Bestimmt die 1-basierte Zeile, in der ein Bild optisch tatsaechlich sitzt
+ * (Zeile seiner vertikalen Mitte), statt nur seiner XML-Ankerzeile - siehe
+ * Erklaerung oben im Datei-Header. Summiert dafuer die LIVE gerenderten
+ * Zeilenhoehen (in Pixel, ueber SpreadsheetApp.getRowHeight - funktioniert
+ * auch fuer Auto-Hoehe-Zeilen, im Gegensatz zur statischen xlsx-XML) ab
+ * row0 auf, bis die Zielmitte erreicht ist.
+ *
+ * @param {Sheet} sheet
+ * @param {number} row0        0-basierte XML-Ankerzeile
+ * @param {number} rowOffEmu   Offset in EMU ab Zeilenanfang
+ * @param {number} [extCyEmu]  Bildhoehe in EMU (oneCellAnchor) - falls gesetzt, wird ueber Zeilenhoehen die Zeile der Bildmitte gesucht
+ * @param {number} [toRow0]    0-basierte End-Zeile (twoCellAnchor, falls extCyEmu fehlt) - Naeherung ueber die Zeilen-Mitte
+ * @return {number} 1-basierte sichtbare Zeile
+ */
+function resolveVisualRow_(sheet, row0, rowOffEmu, extCyEmu, toRow0) {
+  var maxRow = sheet.getMaxRows();
+
+  if (extCyEmu == null) {
+    // twoCellAnchor ohne explizite Hoehe: grobe Naeherung ueber die Zeilen-Mitte.
+    var midRow0 = Math.round((row0 + (toRow0 != null ? toRow0 : row0)) / 2);
+    return Math.min(midRow0 + 1, maxRow);
+  }
+
+  var remainingEmu = (rowOffEmu || 0) + extCyEmu / 2;
+  var currentRow1Based = row0 + 1;
+
+  while (currentRow1Based <= maxRow) {
+    var rowHeightEmu = sheet.getRowHeight(currentRow1Based) * EMU_PER_PIXEL_;
+    if (remainingEmu < rowHeightEmu) return currentRow1Based;
+    remainingEmu -= rowHeightEmu;
+    currentRow1Based++;
+  }
+  return maxRow;
 }
 
 /** 1-basierte Spaltennummer -> Buchstabe(n), z.B. 9 -> "I", 27 -> "AA" (wie Phrase's "Identify ... column"-Felder es erwarten). */
