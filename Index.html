@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <style>
+    body {
+      font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+      max-width: 680px;
+      margin: 40px auto;
+      padding: 0 20px 60px;
+      color: #202124;
+    }
+    h1 { font-size: 20px; margin-bottom: 4px; }
+    p.desc { color: #5f6368; font-size: 13px; line-height: 1.6; }
+    #configWarning {
+      display: none;
+      background: #fef7e0;
+      border: 1px solid #f9d67e;
+      color: #7a5b00;
+      padding: 12px 14px;
+      border-radius: 6px;
+      font-size: 13px;
+      margin: 16px 0;
+    }
+    label { display: block; font-size: 13px; font-weight: 600; margin-top: 18px; margin-bottom: 6px; }
+    input[type=text] {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 10px 12px;
+      font-size: 14px;
+      border: 1px solid #dadce0;
+      border-radius: 4px;
+    }
+    button {
+      margin-top: 22px;
+      padding: 10px 26px;
+      font-size: 14px;
+      font-weight: 600;
+      background: #1a1a1a;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    button:disabled { background: #9aa0a6; cursor: default; }
+    #status { margin-top: 20px; font-size: 13px; }
+    #status .error { color: #c5221f; }
+    #status .success { color: #188038; font-weight: 600; margin-bottom: 8px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 12px; }
+    th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #eee; vertical-align: top; }
+    th { color: #5f6368; font-weight: 600; }
+    a { color: #1a73e8; word-break: break-all; }
+    .loader {
+      display: inline-block;
+      width: 14px; height: 14px;
+      border: 2px solid #ccc;
+      border-top-color: #1a1a1a;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      vertical-align: -2px;
+      margin-right: 6px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <h1>CH-BATCH &ndash; Screenshot Context Notes</h1>
+  <p class="desc">
+    Workaround f&uuml;r Phrase-Support-Ticket #243154 (DISC-790): Phrase rendert eingebettete
+    Screenshots in Excel-Dateien nicht im CAT-Editor-Preview. Dieses Tool liest alle
+    eingebetteten Bilder aus einem Google Sheet &ndash; &uuml;ber s&auml;mtliche Tabellenbl&auml;tter
+    hinweg &ndash;, hostet sie extern und schreibt die &ouml;ffentlichen URLs in eine gemeinsame
+    Spalte zur&uuml;ck. Diese Spalte kannst du beim Multilingual-Excel-Import in Phrase als
+    <strong>"Context Note"</strong> zuordnen, damit die Screenshots als Kontext-Link im
+    Editor sichtbar werden.
+  </p>
+
+  <div id="configWarning"></div>
+
+  <label for="sheetUrl">Google-Sheet-Link oder Spreadsheet-ID</label>
+  <input type="text" id="sheetUrl" placeholder="https://docs.google.com/spreadsheets/d/.../edit" autofocus>
+
+  <button id="runBtn" onclick="run()">Verarbeiten</button>
+
+  <div id="status"></div>
+
+  <script>
+    google.script.run.withSuccessHandler(function (cfg) {
+      if (cfg.hasServiceAccount && cfg.hasSiteId) return;
+      var el = document.getElementById('configWarning');
+      el.style.display = 'block';
+      var missing = [];
+      if (!cfg.hasServiceAccount) missing.push('SERVICE_ACCOUNT_JSON');
+      if (!cfg.hasSiteId) missing.push('FIREBASE_SITE_ID');
+      el.innerText = '⚠️ Noch nicht eingerichtet: Script Property' +
+        (missing.length > 1 ? 's' : '') + ' ' + missing.join(' und ') +
+        ' fehlt/fehlen (Apps-Script-Editor → Project Settings → Script Properties). Siehe README.';
+      document.getElementById('runBtn').disabled = true;
+    }).apiGetConfigStatus();
+
+    function run() {
+      var url = document.getElementById('sheetUrl').value.trim();
+      var statusEl = document.getElementById('status');
+      var btn = document.getElementById('runBtn');
+      if (!url) {
+        statusEl.innerHTML = '<div class="error">Bitte einen Link oder eine ID eingeben.</div>';
+        return;
+      }
+
+      btn.disabled = true;
+      statusEl.innerHTML = '<span class="loader"></span>Verarbeite&hellip; (kann je nach Anzahl Bilder eine Weile dauern)';
+
+      google.script.run
+        .withSuccessHandler(function (r) {
+          btn.disabled = false;
+          if (!r.success) {
+            statusEl.innerHTML = '<div class="error">Fehler: ' + escapeHtml(r.error) + '</div>';
+            return;
+          }
+          var html = '<div class="success">✓ ' + r.count + ' Bild(er) über ' +
+            r.sheetsProcessed.length + ' Blatt/Blätter gehostet. Zielspalte: ' + r.columnLetter + '</div>';
+          html += '<table><thead><tr><th>Blatt</th><th>Zeile</th><th>URL</th></tr></thead><tbody>';
+          r.results.forEach(function (row) {
+            html += '<tr><td>' + escapeHtml(row.sheet) + '</td><td>' + row.row + '</td>' +
+              '<td><a href="' + row.imageUrl + '" target="_blank">' + escapeHtml(row.imageUrl) + '</a></td></tr>';
+          });
+          html += '</tbody></table>';
+          statusEl.innerHTML = html;
+        })
+        .withFailureHandler(function (e) {
+          btn.disabled = false;
+          statusEl.innerHTML = '<div class="error">Fehler: ' + escapeHtml(e.message) + '</div>';
+        })
+        .apiProcessSheet(url);
+    }
+
+    function escapeHtml(s) {
+      var div = document.createElement('div');
+      div.innerText = String(s == null ? '' : s);
+      return div.innerHTML;
+    }
+  </script>
+</body>
+</html>
