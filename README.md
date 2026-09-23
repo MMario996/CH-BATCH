@@ -12,7 +12,7 @@ Dieses Tool ist ein manuelles Pre-Batch-Werkzeug: Google-Sheet-Link eintragen, v
 
 1. Liest alle **eingebetteten (über Zellen liegenden) Bilder** aus einem Google Sheet – über **alle Tabellenblätter** hinweg.
 2. Veröffentlicht jedes Bild unter einem eigenen, nicht erratbaren Pfad auf **Firebase Hosting**.
-3. Schreibt die öffentliche URL in dieselbe Zeile zurück, in eine **gemeinsame Spalte für alle Tabs** (eine Spalte rechts von der breitesten Tabelle) – wichtig, weil Phrases "Identify context note column" nur eine einzige Einstellung pro Import-Profil ist und für alle Blätter gleichermaßen gilt.
+3. Schreibt die öffentliche URL in eine **gemeinsame Spalte für alle Tabs** (wichtig, weil Phrases "Identify context note column" nur eine einzige Einstellung pro Import-Profil ist und für alle Blätter gleichermaßen gilt) – und zwar in die Zeile, in der das jeweilige Bild optisch **endet** (direkt darunter, nie mittendrin). Hat die Vorlage bereits eine eigene Spalte namens **"Screenshot"**, wird genau diese wiederverwendet, statt eine neue anzulegen – sonst bleibt in Phrases CAT-Editor an der Bildposition eine leere Spalte übrig, weil eingebettete Bilder dort keinen Zellenwert liefern. Nur wenn keine solche Spalte gefunden wird (oder sie sich zwischen den Tabs widerspricht), legt das Tool wie bisher eine neue Spalte rechts von der breitesten Tabelle an.
 
 ## Einmaliges Setup
 

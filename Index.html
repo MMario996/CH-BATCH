@@ -119,7 +119,8 @@
             return;
           }
           var html = '<div class="success">✓ ' + r.count + ' Bild(er) über ' +
-            r.sheetsProcessed.length + ' Blatt/Blätter gehostet. Zielspalte: ' + r.columnLetter + '</div>';
+            r.sheetsProcessed.length + ' Blatt/Blätter gehostet. Zielspalte: ' + r.columnLetter +
+            (r.reusedExistingColumn ? ' (vorhandene "Screenshot"-Spalte wiederverwendet)' : ' (neu angelegt)') + '</div>';
           html += '<table><thead><tr><th>Blatt</th><th>Zeile</th><th>URL</th></tr></thead><tbody>';
           r.results.forEach(function (row) {
             html += '<tr><td>' + escapeHtml(row.sheet) + '</td><td>' + row.row + '</td>' +
